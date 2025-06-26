@@ -293,22 +293,24 @@ impl Menu {
             let page = &self.pages[current_page];
             let mut found = false;
 
-            for column in &page.columns {
-                for item in &column.items {
-                    if item.key.to_string() == key.to_string() {
-                        match &item.action {
-                            Action::Submenu(submenu_page) => {
-                                current_page = *submenu_page;
-                                found = true;
-                                break;
-                            }
-                            action @ (Action::Exec { .. } | Action::Quit) => {
-                                if i == keys.len() - 1 {
-                                    // This is the final key, execute the action
-                                    return Ok(Some(action.clone()));
-                                } else {
-                                    bail!("Key '{}' leads to a command, but more keys follow in sequence", key_str);
-                                }
+            for mapping in page.key_mappings.iter() {
+                let (mapped_key, action) = mapping;
+                if mapped_key.to_string() == key.to_string() {
+                    match action {
+                        Action::Submenu(submenu_page) => {
+                            current_page = *submenu_page;
+                            found = true;
+                            break;
+                        }
+                        action @ (Action::Exec { .. } | Action::Quit) => {
+                            if i == keys.len() - 1 {
+                                // This is the final key, execute the action
+                                return Ok(Some(action.clone()));
+                            } else {
+                                bail!(
+                                    "Key '{}' leads to a command, but more keys follow in sequence",
+                                    key_str
+                                );
                             }
                         }
                     }
