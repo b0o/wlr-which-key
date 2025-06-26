@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::{bail, Result};
 use pangocairo::{cairo, pango};
 use wayrs_utils::keyboard::xkb;
@@ -274,5 +276,54 @@ impl Menu {
 
     pub fn set_page(&mut self, page: usize) {
         self.cur_page = page;
+    }
+
+    pub fn navigate_to_key_sequence(&mut self, key_sequence: &str) -> Result<Option<Action>> {
+        let keys: Vec<&str> = key_sequence.split_whitespace().collect();
+        if keys.is_empty() {
+            return Ok(None);
+        }
+
+        let mut current_page = 0;
+
+        for (i, key_str) in keys.iter().enumerate() {
+            let key = Key::from_str(key_str)
+                .map_err(|_| anyhow::anyhow!("Invalid key: '{}'", key_str))?;
+
+            let page = &self.pages[current_page];
+            let mut found = false;
+
+            for column in &page.columns {
+                for item in &column.items {
+                    if item.key.to_string() == key.to_string() {
+                        match &item.action {
+                            Action::Submenu(submenu_page) => {
+                                current_page = *submenu_page;
+                                found = true;
+                                break;
+                            }
+                            action @ (Action::Exec { .. } | Action::Quit) => {
+                                if i == keys.len() - 1 {
+                                    // This is the final key, execute the action
+                                    return Ok(Some(action.clone()));
+                                } else {
+                                    bail!("Key '{}' leads to a command, but more keys follow in sequence", key_str);
+                                }
+                            }
+                        }
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+
+            if !found {
+                bail!("Key '{}' not found in current menu", key_str);
+            }
+        }
+
+        self.cur_page = current_page;
+        Ok(None)
     }
 }

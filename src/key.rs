@@ -61,6 +61,14 @@ impl From<SingleKey> for Key {
     }
 }
 
+impl FromStr for Key {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Key::from(SingleKey::from_str(s)?))
+    }
+}
+
 impl FromStr for SingleKey {
     type Err = String;
 

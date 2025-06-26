@@ -39,6 +39,14 @@ struct Args {
     /// For example, to use ~/.config/wlr-which-key/print-srceen.yaml, set this to
     /// "print-srceen". An absolute path can be used too, extension is optional.
     config: Option<String>,
+
+    /// Initial key sequence to navigate to a specific submenu on startup.
+    ///
+    /// Provide a sequence of keys separated by spaces to navigate directly to a submenu.
+    /// For example, "p s" would navigate to the submenu at key 'p', then 's'.
+    /// The application will show an error and exit if the key sequence is invalid.
+    #[arg(long, short = 'k')]
+    initial_keys: Option<String>,
 }
 
 static DEBUG_LAYOUT: LazyLock<bool> =
@@ -47,7 +55,21 @@ static DEBUG_LAYOUT: LazyLock<bool> =
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = config::Config::new(args.config.as_deref().unwrap_or("config"))?;
-    let menu = menu::Menu::new(&config)?;
+    let mut menu = menu::Menu::new(&config)?;
+
+    // Navigate to initial key sequence if provided
+    let mut initial_action = None;
+    if let Some(initial_keys) = &args.initial_keys {
+        match menu.navigate_to_key_sequence(initial_keys) {
+            Ok(action) => {
+                initial_action = action;
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     let mut conn = Connection::connect()?;
     conn.blocking_roundtrip()?;
@@ -114,6 +136,11 @@ fn main() -> anyhow::Result<()> {
         menu,
         config,
     };
+
+    // Handle initial action if it's a command
+    if let Some(action) = initial_action {
+        state.handle_action(&mut conn, action);
+    }
 
     while !state.exit {
         conn.flush(IoMode::Blocking)?;
