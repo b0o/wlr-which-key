@@ -17,6 +17,7 @@ pub struct Menu {
 struct MenuPage {
     item_height: f64,
     columns: Vec<MenuColumn>,
+    key_mappings: Vec<(Key, Action)>,
     parent: Option<usize>,
 }
 
@@ -27,10 +28,8 @@ struct MenuColumn {
 }
 
 struct MenuItem {
-    action: Action,
     key_comp: ComputedText,
     val_comp: ComputedText,
-    key: Key,
 }
 
 #[derive(Clone)]
@@ -73,39 +72,53 @@ impl Menu {
         self.pages.push(MenuPage {
             item_height: self.separator.height,
             columns: Vec::new(),
+            key_mappings: Vec::new(),
             parent,
         });
 
-        for (entry_i, entry) in entries.iter().enumerate() {
-            let item = match entry {
+        let mut visible_entry_i = 0;
+        for entry in entries.iter() {
+            let (key, action, item, is_hidden) = match entry {
                 config::Entry::Cmd {
                     key,
                     cmd,
                     desc,
                     keep_open,
-                } => MenuItem {
-                    action: Action::Exec {
+                    hide,
+                } => {
+                    let action = Action::Exec {
                         cmd: cmd.into(),
                         keep_open: *keep_open,
-                    },
-                    key_comp: ComputedText::new(key.to_string(), context, &config.font.0),
-                    val_comp: ComputedText::new(desc, context, &config.font.0),
-                    key: key.clone(),
-                },
+                    };
+                    let item = MenuItem {
+                        key_comp: ComputedText::new(key.to_string(), context, &config.font.0),
+                        val_comp: ComputedText::new(desc, context, &config.font.0),
+                    };
+                    (key.clone(), action, item, *hide)
+                }
                 config::Entry::Recursive {
                     key,
                     submenu: entries,
                     desc,
+                    hide,
                 } => {
                     let new_page = self.push_page(context, entries, config, Some(cur_page))?;
-                    MenuItem {
-                        action: Action::Submenu(new_page),
+                    let action = Action::Submenu(new_page);
+                    let item = MenuItem {
                         key_comp: ComputedText::new(key.to_string(), context, &config.font.0),
                         val_comp: ComputedText::new(format!("+{desc}"), context, &config.font.0),
-                        key: key.clone(),
-                    }
+                    };
+                    (key.clone(), action, item, *hide)
                 }
             };
+
+            // Store key mapping for input handling (all items)
+            self.pages[cur_page].key_mappings.push((key, action));
+
+            // Skip hidden items for layout/rendering
+            if is_hidden {
+                continue;
+            }
 
             let height = f64::max(item.key_comp.height, item.val_comp.height);
             if height > self.pages[cur_page].item_height {
@@ -114,7 +127,7 @@ impl Menu {
 
             let col_i = config
                 .rows_per_column
-                .map_or(0, |rows_per_column| entry_i / rows_per_column);
+                .map_or(0, |rows_per_column| visible_entry_i / rows_per_column);
 
             if col_i == self.pages[cur_page].columns.len() {
                 self.pages[cur_page].columns.push(MenuColumn {
@@ -128,6 +141,8 @@ impl Menu {
                 col.val_col_width = col.val_col_width.max(item.val_comp.width);
                 col.items.push(item);
             }
+
+            visible_entry_i += 1;
         }
 
         Ok(cur_page)
@@ -135,6 +150,9 @@ impl Menu {
 
     pub fn width(&self, config: &Config) -> f64 {
         let page = &self.pages[self.cur_page];
+        if page.columns.is_empty() {
+            return (config.padding() + config.border_width) * 2.0;
+        }
         page.columns
             .iter()
             .map(|col| col.key_col_width + col.val_col_width + self.separator.width)
@@ -145,6 +163,9 @@ impl Menu {
 
     pub fn height(&self, config: &Config) -> f64 {
         let page = &self.pages[self.cur_page];
+        if page.columns.is_empty() {
+            return (config.padding() + config.border_width) * 2.0;
+        }
         page.columns
             .iter()
             .map(|col| page.item_height * col.items.len() as f64)
@@ -225,11 +246,10 @@ impl Menu {
         let page = &self.pages[self.cur_page];
         let modifiers = ModifierState::from_xkb_state(xkb);
 
-        let action = page.columns.iter().find_map(|col| {
-            col.items
-                .iter()
-                .find_map(|i| i.key.matches(sym, modifiers).then(|| i.action.clone()))
-        });
+        let action = page
+            .key_mappings
+            .iter()
+            .find_map(|(key, action)| key.matches(sym, modifiers).then(|| action.clone()));
         if action.is_some() {
             return action;
         }

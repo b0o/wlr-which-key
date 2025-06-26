@@ -21,6 +21,8 @@ Keybindings may be single characters (e.g. `a`, `B`) or [xkb key labels](https:/
 When executed a command will normally end the `wlr_which_key` process. If you want certain commands to keep the UI open after they execute then
 configure those specific commands with (`keep_open: true`).
 
+To hide a key from the display while keeping it functional, set `hide: true`. Hidden keys will still respond to input but won't appear in the menu.
+
 Example config:
 
 ```yaml
@@ -67,6 +69,10 @@ menu:
       - key: "t"
         desc: Toggle On/Off
         cmd: toggle-laptop-display.sh
+      - key: "m"
+        desc: Mirror
+        cmd: mirror.sh
+        hide: true # Hides the key from displaying in the menu, but still responds to input
       - key: "s"
         desc: Scale
         submenu:
