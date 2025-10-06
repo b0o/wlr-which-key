@@ -80,9 +80,10 @@ impl Menu {
 
         let mut visible_entry_i = 0;
         for entry in entries.iter() {
-            let (key, action, item, is_hidden) = match entry {
+            let (key, aliases, action, item, is_hidden) = match entry {
                 config::Entry::Cmd {
                     key,
+                    aliases,
                     cmd,
                     desc,
                     keep_open,
@@ -96,10 +97,11 @@ impl Menu {
                         key_comp: ComputedText::new(key.to_string(), context, &config.font.0),
                         val_comp: ComputedText::new(desc, context, &config.font.0),
                     };
-                    (key.clone(), action, item, *hide)
+                    (key.clone(), aliases.clone(), action, item, *hide)
                 }
                 config::Entry::Recursive {
                     key,
+                    aliases,
                     submenu: entries,
                     desc,
                     hide,
@@ -110,12 +112,17 @@ impl Menu {
                         key_comp: ComputedText::new(key.to_string(), context, &config.font.0),
                         val_comp: ComputedText::new(format!("+{desc}"), context, &config.font.0),
                     };
-                    (key.clone(), action, item, *hide)
+                    (key.clone(), aliases.clone(), action, item, *hide)
                 }
             };
 
-            // Store key mapping for input handling (all items)
-            self.pages[cur_page].key_mappings.push((key, action));
+            // Store key mapping for input handling (all items) - main key
+            self.pages[cur_page].key_mappings.push((key, action.clone()));
+            
+            // Store key mappings for aliases
+            for alias in aliases {
+                self.pages[cur_page].key_mappings.push((alias, action.clone()));
+            }
 
             // Skip hidden items for layout/rendering
             if is_hidden {

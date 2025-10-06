@@ -69,6 +69,7 @@ impl From<Config> for super::Config {
                         keep_open,
                     } => super::Entry::Cmd {
                         key: key.into(),
+                        aliases: Vec::new(),
                         cmd,
                         desc,
                         keep_open,
@@ -76,6 +77,7 @@ impl From<Config> for super::Config {
                     },
                     Entry::Recursive { submenu, desc } => super::Entry::Recursive {
                         key: key.into(),
+                        aliases: Vec::new(),
                         submenu: map_entries(submenu),
                         desc,
                         hide: false,

@@ -4,10 +4,18 @@ use serde::Deserialize;
 use crate::key::Key;
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+pub enum Alias {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+#[derive(Deserialize)]
 #[serde(try_from = "RawEntry")]
 pub enum Entry {
     Cmd {
         key: Key,
+        aliases: Vec<Key>,
         cmd: String,
         desc: String,
         keep_open: bool,
@@ -15,6 +23,7 @@ pub enum Entry {
     },
     Recursive {
         key: Key,
+        aliases: Vec<Key>,
         submenu: Vec<Self>,
         desc: String,
         hide: bool,
@@ -30,12 +39,26 @@ struct RawEntry {
     keep_open: Option<bool>,
     submenu: Option<Vec<Entry>>,
     hide: Option<bool>,
+    alias: Option<Alias>,
 }
 
 impl TryFrom<RawEntry> for Entry {
     type Error = anyhow::Error;
 
     fn try_from(value: RawEntry) -> Result<Self, Self::Error> {
+        let aliases = match value.alias {
+            Some(Alias::Single(alias_str)) => {
+                vec![alias_str.parse().map_err(|e| anyhow::anyhow!("Invalid alias key '{}': {}", alias_str, e))?]
+            }
+            Some(Alias::Multiple(alias_strs)) => {
+                alias_strs
+                    .into_iter()
+                    .map(|s| s.parse().map_err(|e| anyhow::anyhow!("Invalid alias key '{}': {}", s, e)))
+                    .collect::<Result<Vec<Key>, _>>()?
+            }
+            None => Vec::new(),
+        };
+
         if let Some(submenu) = value.submenu {
             if value.cmd.is_some() {
                 bail!("cannot have both 'submenu' and 'cmd'");
@@ -45,6 +68,7 @@ impl TryFrom<RawEntry> for Entry {
             }
             Ok(Self::Recursive {
                 key: value.key,
+                aliases,
                 submenu,
                 desc: value.desc,
                 hide: value.hide.unwrap_or(false),
@@ -52,6 +76,7 @@ impl TryFrom<RawEntry> for Entry {
         } else {
             Ok(Self::Cmd {
                 key: value.key,
+                aliases,
                 cmd: value
                     .cmd
                     .context("either or 'submenu' or 'cmd' is required")?,
