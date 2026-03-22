@@ -162,17 +162,7 @@ impl Menu {
     }
 
     pub fn width(&self, config: &Config) -> f64 {
-        let page = &self.pages[self.cur_page];
-        let w = if page.columns.is_empty() {
-            (config.padding() + config.border_width) * 2.0
-        } else {
-            page.columns
-                .iter()
-                .map(|col| col.key_col_width + col.val_col_width + self.separator.width)
-                .sum::<f64>()
-                + (page.columns.len() - 1) as f64 * config.column_padding()
-                + (config.padding() + config.border_width) * 2.0
-        };
+        let w = self.content_width(config) + (config.padding() + config.border_width) * 2.0;
         match config.min_width {
             Some(min) => w.max(min),
             None => w,
@@ -192,8 +182,24 @@ impl Menu {
             + (config.padding() + config.border_width) * 2.0
     }
 
+    fn content_width(&self, config: &Config) -> f64 {
+        let page = &self.pages[self.cur_page];
+        if page.columns.is_empty() {
+            return 0.0;
+        }
+        page.columns
+            .iter()
+            .map(|col| col.key_col_width + col.val_col_width + self.separator.width)
+            .sum::<f64>()
+            + (page.columns.len() - 1) as f64 * config.column_padding()
+    }
+
     pub fn render(&self, config: &config::Config, cairo_ctx: &cairo::Context) -> Result<()> {
-        let mut dx = config.padding() + config.border_width;
+        let extra = (self.width(config)
+            - self.content_width(config)
+            - (config.padding() + config.border_width) * 2.0)
+            / 2.0;
+        let mut dx = config.padding() + config.border_width + extra;
         let dy = config.padding() + config.border_width;
         let page = &self.pages[self.cur_page];
         for col in &page.columns {
