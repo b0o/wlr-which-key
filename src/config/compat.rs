@@ -102,6 +102,7 @@ impl From<Config> for super::Config {
             padding: value.padding,
             rows_per_column: None,
             column_padding: None,
+            min_width: None,
             menu: map_entries(value.menu),
             inhibit_compositor_keyboard_shortcuts: false,
             auto_kbd_layout: false,

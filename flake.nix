@@ -6,12 +6,15 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+  }:
+    flake-utils.lib.eachDefaultSystem (
+      system: let
         pkgs = nixpkgs.legacyPackages.${system};
-      in
-      {
+      in {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "wlr-which-key";
           version = "1.2.0";
@@ -42,18 +45,19 @@
           };
         };
 
+        packages.debug = self.packages.${system}.default.overrideAttrs {
+          buildType = "debug";
+        };
+
         devShells.default = pkgs.mkShell {
+          inputsFrom = [self.packages.${system}.default];
           buildInputs = with pkgs; [
             cargo
             rustc
             rustfmt
             clippy
             rust-analyzer
-            pkg-config
-            cairo
-            pango
-            wayland
-            libxkbcommon
+            self.packages.${system}.debug
           ];
 
           RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";

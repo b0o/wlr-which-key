@@ -45,6 +45,7 @@ pub struct Config {
     pub padding: Option<f64>,
     pub rows_per_column: Option<usize>,
     pub column_padding: Option<f64>,
+    pub min_width: Option<f64>,
 
     pub inhibit_compositor_keyboard_shortcuts: bool,
     pub auto_kbd_layout: bool,

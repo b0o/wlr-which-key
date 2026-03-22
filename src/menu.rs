@@ -163,15 +163,20 @@ impl Menu {
 
     pub fn width(&self, config: &Config) -> f64 {
         let page = &self.pages[self.cur_page];
-        if page.columns.is_empty() {
-            return (config.padding() + config.border_width) * 2.0;
+        let w = if page.columns.is_empty() {
+            (config.padding() + config.border_width) * 2.0
+        } else {
+            page.columns
+                .iter()
+                .map(|col| col.key_col_width + col.val_col_width + self.separator.width)
+                .sum::<f64>()
+                + (page.columns.len() - 1) as f64 * config.column_padding()
+                + (config.padding() + config.border_width) * 2.0
+        };
+        match config.min_width {
+            Some(min) => w.max(min),
+            None => w,
         }
-        page.columns
-            .iter()
-            .map(|col| col.key_col_width + col.val_col_width + self.separator.width)
-            .sum::<f64>()
-            + (page.columns.len() - 1) as f64 * config.column_padding()
-            + (config.padding() + config.border_width) * 2.0
     }
 
     pub fn height(&self, config: &Config) -> f64 {
