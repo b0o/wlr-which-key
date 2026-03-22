@@ -53,9 +53,15 @@ margin_bottom: 0
 margin_left: 0
 margin_top: 0
 
+# namespace to use for the layer shell surface
+namespace: "wlr_which_key"
+
 # Permits key bindings that conflict with compositor key bindings.
 # Default is `false`.
 inhibit_compositor_keyboard_shortcuts: true
+
+# Try to guess the correct keyboard layout to use. Default is `false`.
+auto_kbd_layout: true
 
 menu:
   - key: "p"

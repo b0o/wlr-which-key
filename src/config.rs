@@ -2,18 +2,20 @@ mod anchor;
 mod compat;
 mod entry;
 mod font;
+mod namespace;
 
 use std::env;
 use std::fs::read_to_string;
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use smart_default::SmartDefault;
 
 pub use self::anchor::ConfigAnchor;
 pub use self::entry::Entry;
 pub use self::font::Font;
+pub use self::namespace::Namespace;
 use crate::color::Color;
 
 #[derive(Deserialize, SmartDefault)]
@@ -45,8 +47,12 @@ pub struct Config {
     pub column_padding: Option<f64>,
 
     pub inhibit_compositor_keyboard_shortcuts: bool,
+    pub auto_kbd_layout: bool,
 
     pub menu: Vec<Entry>,
+
+    #[default(Namespace::new(c"wlr_which_key".to_owned()))]
+    pub namespace: Namespace,
 }
 
 impl Config {
@@ -68,7 +74,9 @@ impl Config {
             Ok(config) => Ok(config),
             Err(err) => match serde_yaml::from_str::<compat::Config>(&config_str) {
                 Ok(compat) => {
-                    eprintln!("Warning: using the old config format, which will be removed in a future version.");
+                    eprintln!(
+                        "Warning: using the old config format, which will be removed in a future version."
+                    );
                     Ok(compat.into())
                 }
                 Err(_compat_err) => Err(err),

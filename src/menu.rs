@@ -1,12 +1,12 @@
 use std::str::FromStr;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Error, Result};
 use pangocairo::{cairo, pango};
 use wayrs_utils::keyboard::xkb;
 
 use crate::color::Color;
 use crate::config::{self, Config};
-use crate::key::{Key, ModifierState};
+use crate::key::{Key, ModifierState, SingleKey};
 use crate::text::{self, ComputedText};
 use crate::DEBUG_LAYOUT;
 
@@ -117,11 +117,15 @@ impl Menu {
             };
 
             // Store key mapping for input handling (all items) - main key
-            self.pages[cur_page].key_mappings.push((key, action.clone()));
-            
+            self.pages[cur_page]
+                .key_mappings
+                .push((key, action.clone()));
+
             // Store key mappings for aliases
             for alias in aliases {
-                self.pages[cur_page].key_mappings.push((alias, action.clone()));
+                self.pages[cur_page]
+                    .key_mappings
+                    .push((alias, action.clone()));
             }
 
             // Skip hidden items for layout/rendering
@@ -251,9 +255,8 @@ impl Menu {
         Ok(())
     }
 
-    pub fn get_action(&self, xkb: &xkb::State, sym: xkb::Keysym) -> Option<Action> {
+    pub fn get_action(&self, modifiers: ModifierState, sym: xkb::Keysym) -> Option<Action> {
         let page = &self.pages[self.cur_page];
-        let modifiers = ModifierState::from_xkb_state(xkb);
 
         let action = page
             .key_mappings
@@ -286,53 +289,18 @@ impl Menu {
     }
 
     pub fn navigate_to_key_sequence(&mut self, key_sequence: &str) -> Result<Option<Action>> {
-        let keys: Vec<&str> = key_sequence.split_whitespace().collect();
-        if keys.is_empty() {
-            return Ok(None);
-        }
-
-        let mut current_page = 0;
-
-        for (i, key_str) in keys.iter().enumerate() {
-            let key = Key::from_str(key_str)
-                .map_err(|_| anyhow::anyhow!("Invalid key: '{}'", key_str))?;
-
-            let page = &self.pages[current_page];
-            let mut found = false;
-
-            for mapping in page.key_mappings.iter() {
-                let (mapped_key, action) = mapping;
-                if mapped_key.to_string() == key.to_string() {
-                    match action {
-                        Action::Submenu(submenu_page) => {
-                            current_page = *submenu_page;
-                            found = true;
-                            break;
-                        }
-                        action @ (Action::Exec { .. } | Action::Quit) => {
-                            if i == keys.len() - 1 {
-                                // This is the final key, execute the action
-                                return Ok(Some(action.clone()));
-                            } else {
-                                bail!(
-                                    "Key '{}' leads to a command, but more keys follow in sequence",
-                                    key_str
-                                );
-                            }
-                        }
-                    }
-                }
-                if found {
-                    break;
-                }
+        let mut last_action = None;
+        for key_str in key_sequence.split_whitespace() {
+            if let Some((last_key_str, _action)) = &last_action {
+                bail!("Key '{last_key_str}' leads to a command, but more keys follow in sequence");
             }
-
-            if !found {
-                bail!("Key '{}' not found in current menu", key_str);
+            let key = SingleKey::from_str(key_str).map_err(Error::msg)?;
+            match self.get_action(key.modifiers, key.keysym) {
+                Some(Action::Submenu(submenu_page)) => self.set_page(submenu_page),
+                Some(action) => last_action = Some((key_str, action)),
+                None => bail!("Key '{}' not found in current menu", key_str),
             }
         }
-
-        self.cur_page = current_page;
-        Ok(None)
+        Ok(last_action.map(|x| x.1))
     }
 }
