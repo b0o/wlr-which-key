@@ -132,6 +132,7 @@ fn main() -> anyhow::Result<()> {
         visible_on_outputs: HashSet::new(),
         surface_scale: 1,
         exit: false,
+        exit_on_key_release: None,
         configured: false,
         width,
         height,
@@ -181,6 +182,9 @@ struct State {
     visible_on_outputs: HashSet<ObjectId>,
     surface_scale: u32,
     exit: bool,
+    /// Keycode to wait for release before exiting. While set, the surface is
+    /// kept mapped but fully transparent so it retains keyboard grab.
+    exit_on_key_release: Option<xkb::Keycode>,
     configured: bool,
     width: u32,
     height: u32,
@@ -259,47 +263,52 @@ impl State {
         cairo_ctx.scale(scale as f64, scale as f64);
         self.wl_surface.set_buffer_scale(conn, scale as i32);
 
-        // background with rounded corners
+        // Clear surface to transparent
         cairo_ctx.save().unwrap();
         cairo_ctx.set_operator(cairo::Operator::Source);
         color::Color::TRANSPARENT.apply(&cairo_ctx);
         cairo_ctx.paint().unwrap();
         cairo_ctx.restore().unwrap();
 
-        cairo_ctx.new_sub_path();
-        let half_border = self.config.border_width * 0.5;
-        let r = self.config.corner_r;
-        cairo_ctx.arc(r + half_border, r + half_border, r, PI, 3.0 * FRAC_PI_2);
-        cairo_ctx.arc(
-            width_f - r - half_border,
-            r + half_border,
-            r,
-            3.0 * FRAC_PI_2,
-            TAU,
-        );
-        cairo_ctx.arc(
-            width_f - r - half_border,
-            height_f - r - half_border,
-            r,
-            0.0,
-            FRAC_PI_2,
-        );
-        cairo_ctx.arc(
-            r + half_border,
-            height_f - r - half_border,
-            r,
-            FRAC_PI_2,
-            PI,
-        );
-        cairo_ctx.close_path();
-        self.config.background.apply(&cairo_ctx);
-        cairo_ctx.fill_preserve().unwrap();
-        self.config.border.apply(&cairo_ctx);
-        cairo_ctx.set_line_width(self.config.border_width);
-        cairo_ctx.stroke().unwrap();
+        // When waiting for key release before exit, keep the surface mapped
+        // (to retain keyboard grab) but fully transparent.
+        if self.exit_on_key_release.is_none() {
+            // background with rounded corners
+            cairo_ctx.new_sub_path();
+            let half_border = self.config.border_width * 0.5;
+            let r = self.config.corner_r;
+            cairo_ctx.arc(r + half_border, r + half_border, r, PI, 3.0 * FRAC_PI_2);
+            cairo_ctx.arc(
+                width_f - r - half_border,
+                r + half_border,
+                r,
+                3.0 * FRAC_PI_2,
+                TAU,
+            );
+            cairo_ctx.arc(
+                width_f - r - half_border,
+                height_f - r - half_border,
+                r,
+                0.0,
+                FRAC_PI_2,
+            );
+            cairo_ctx.arc(
+                r + half_border,
+                height_f - r - half_border,
+                r,
+                FRAC_PI_2,
+                PI,
+            );
+            cairo_ctx.close_path();
+            self.config.background.apply(&cairo_ctx);
+            cairo_ctx.fill_preserve().unwrap();
+            self.config.border.apply(&cairo_ctx);
+            cairo_ctx.set_line_width(self.config.border_width);
+            cairo_ctx.stroke().unwrap();
 
-        // draw our menu
-        self.menu.render(&self.config, &cairo_ctx).unwrap();
+            // draw our menu
+            self.menu.render(&self.config, &cairo_ctx).unwrap();
+        }
 
         // Damage the entire window
         self.wl_surface.damage_buffer(
@@ -318,16 +327,9 @@ impl State {
 
     fn handle_action(&mut self, conn: &mut Connection<Self>, action: menu::Action) {
         match action {
-            menu::Action::Quit => {
-                self.exit = true;
-                conn.break_dispatch_loop();
-            }
-            menu::Action::Exec { cmd, keep_open } => {
+            menu::Action::Quit => {}
+            menu::Action::Exec { cmd, .. } => {
                 exec(&cmd);
-                if !keep_open {
-                    self.exit = true;
-                    conn.break_dispatch_loop();
-                }
             }
             menu::Action::Submenu(page) => {
                 self.menu.set_page(page);
@@ -385,6 +387,9 @@ impl KeyboardHandler for State {
     }
 
     fn key_presed(&mut self, conn: &mut Connection<Self>, event: KeyboardEvent) {
+        if self.exit_on_key_release.is_some() {
+            return; // Ignore new key presses while waiting for exit key release
+        }
         self.kbd_repeat = None;
         let modifiers = ModifierState::from_xkb_state(&event.xkb_state);
         let action = if let Some(action) = self.menu.get_action(modifiers, event.keysym) {
@@ -409,15 +414,28 @@ impl KeyboardHandler for State {
             None
         };
         if let Some(action) = action {
-            if let Some(repeat) = event.repeat_info {
+            // For actions that close the window, defer exit until the
+            // triggering key is released so the key-up event isn't sent to
+            // the previously focused window.
+            let closes = matches!(
+                &action,
+                menu::Action::Quit | menu::Action::Exec { keep_open: false, .. }
+            );
+            if closes {
+                self.exit_on_key_release = Some(event.keycode);
+            } else if let Some(repeat) = event.repeat_info {
                 self.kbd_repeat = Some((Timer::new(repeat.delay, repeat.interval), action.clone()));
             }
             self.handle_action(conn, action);
         }
     }
 
-    fn key_released(&mut self, _: &mut Connection<Self>, _: KeyboardEvent) {
+    fn key_released(&mut self, conn: &mut Connection<Self>, event: KeyboardEvent) {
         self.kbd_repeat = None;
+        if self.exit_on_key_release == Some(event.keycode) {
+            self.exit = true;
+            conn.break_dispatch_loop();
+        }
     }
 }
 
