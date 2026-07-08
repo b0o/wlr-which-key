@@ -133,6 +133,7 @@ fn main() -> anyhow::Result<()> {
         surface_scale: 1,
         exit: false,
         exit_on_key_release: None,
+        pending_exec: None,
         configured: false,
         width,
         height,
@@ -165,6 +166,22 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Tear down the surface and release the keyboard grab BEFORE running any
+    // deferred command, then roundtrip so the compositor processes the unmap
+    // and returns keyboard focus to the underlying toplevel. This makes the
+    // command run with no grab held, so the focus changes it triggers land
+    // cleanly (matching the direct-keybind path) instead of racing the grab.
+    for (_seat, inhibitor) in state.keyboard_shortcuts_inhibitors.drain() {
+        inhibitor.destroy(&mut conn);
+    }
+    state.layer_surface.destroy(&mut conn);
+    state.wl_surface.destroy(&mut conn);
+    conn.blocking_roundtrip()?;
+
+    if let Some(cmd) = state.pending_exec.take() {
+        exec(&cmd);
+    }
+
     Ok(())
 }
 
@@ -185,6 +202,11 @@ struct State {
     /// Keycode to wait for release before exiting. While set, the surface is
     /// kept mapped but fully transparent so it retains keyboard grab.
     exit_on_key_release: Option<xkb::Keycode>,
+    /// Command deferred to run after the surface is torn down and the
+    /// compositor has returned keyboard focus to the underlying toplevel.
+    /// Deferring avoids racing the focus changes the command triggers against
+    /// our still-active layer-shell keyboard grab.
+    pending_exec: Option<String>,
     configured: bool,
     width: u32,
     height: u32,
@@ -414,15 +436,27 @@ impl KeyboardHandler for State {
             None
         };
         if let Some(action) = action {
-            // For actions that close the window, defer exit until the
-            // triggering key is released so the key-up event isn't sent to
-            // the previously focused window.
-            let closes = matches!(
-                &action,
-                menu::Action::Quit | menu::Action::Exec { keep_open: false, .. }
-            );
+            if let menu::Action::Exec { cmd, keep_open: false } = &action {
+                // Snappy close: exit and tear down immediately on key-press,
+                // then run the command (see `pending_exec`) once the grab is
+                // released. This avoids racing the command's focus changes
+                // against our keyboard grab without waiting for the key to be
+                // released first. Trade-off: the trigger key's release is
+                // delivered to whatever regains focus (harmless for the
+                // letter-bound scratchpad toggles).
+                self.pending_exec = Some(cmd.clone());
+                self.exit = true;
+                conn.break_dispatch_loop();
+                return;
+            }
+            // For a bare Quit, keep swallowing the key-up: defer exit until the
+            // triggering key is released so it isn't sent to the window that
+            // regains focus.
+            let closes = matches!(&action, menu::Action::Quit);
             if closes {
                 self.exit_on_key_release = Some(event.keycode);
+                self.draw(conn);
+                return;
             } else if let Some(repeat) = event.repeat_info {
                 self.kbd_repeat = Some((Timer::new(repeat.delay, repeat.interval), action.clone()));
             }
